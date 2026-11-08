@@ -87,6 +87,22 @@ docs/             ARCHITECTURE · API · DEPLOYMENT · SECURITY
 - **`web-ci.yml`** — install, typecheck, engine unit tests, production build (PRs + main)
 - **`android-apk.yml`** — Flutter install → `pub get` → format check → analyze → test → **debug APK artifact**
 
+### 📱 Install on your Android phone (Android 8.0+ · Android 12 ready)
+
+1. Open **Actions → build-app → Run workflow** (`publish_release` ticked) — or grab the
+   newest build from the **[Releases](../../releases)** page.
+2. On the phone tap the asset **`cloudfusion-arm64-v8a.apk`** — that covers practically
+   every 64-bit phone from ~2016 onward (`armeabi-v7a` only for older 32-bit devices,
+   `x86_64` for emulators).
+3. Chrome will warn about a debug-signed APK — allow *Install unknown apps* for Chrome
+   and continue. Debug builds are signed with the Flutter debug key, so Play Protect
+   asks for confirmation; this is expected.
+4. Open **CloudFusion**, set **Relay URL** to your backend
+   (`http://<your-lan-ip>:3000` on the same Wi-Fi, or your deployed `https://` URL),
+   tap **Use demo session**.
+
+The phone only exchanges JSON — file bytes never land on the device.
+
 ### Building the app yourself (without Actions)
 
 ```bash
