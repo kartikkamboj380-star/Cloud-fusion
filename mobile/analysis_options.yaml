@@ -1,0 +1,10 @@
+include: package:flutter_lints/flutter.yaml
+
+analyzer:
+  errors:
+    # API payloads are intentionally loose-typed Maps decoded from JSON.
+    avoid_dynamic_calls: ignore
+
+linter:
+  rules:
+    prefer_single_quotes: true

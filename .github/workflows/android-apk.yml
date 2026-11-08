@@ -1,0 +1,54 @@
+name: android-apk
+
+on:
+  push:
+    branches: [main]
+    paths: ["mobile/**", ".github/workflows/android-apk.yml"]
+  pull_request:
+    paths: ["mobile/**", ".github/workflows/android-apk.yml"]
+  workflow_dispatch:
+
+jobs:
+  build-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "17"
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+          cache-key: flutter-:os:-:channel:-:version:-:arch:-:hash:-${{ hashFiles('mobile/pubspec.lock') }}
+
+      - name: Resolve packages
+        run: flutter pub get
+
+      - name: Format check (advisory until tree is dartfmt-stable)
+        run: dart format --output=none --set-exit-if-changed .
+        continue-on-error: true
+
+      - name: Static analysis
+        run: flutter analyze
+
+      - name: Unit tests
+        run: flutter test
+
+      - name: Build debug APK (split per ABI)
+        run: flutter build apk --debug --split-per-abi
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudfusion-debug-apk
+          path: mobile/build/app/outputs/flutter-apk/*.apk
+          retention-days: 14
