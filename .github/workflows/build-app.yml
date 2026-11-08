@@ -22,6 +22,10 @@ on:
         description: "Build the Android APK artifact"
         type: boolean
         default: true
+      publish_release:
+        description: "Publish the APKs as a GitHub Release (installable link for phones)"
+        type: boolean
+        default: true
   push:
     branches: [main]
     paths:
@@ -34,7 +38,7 @@ on:
       - ".github/workflows/build-app.yml"
 
 permissions:
-  contents: read
+  contents: write
 
 concurrency:
   group: build-app-${{ github.ref }}
@@ -234,3 +238,32 @@ jobs:
           name: cloudfusion-apk
           path: dist/*.apk
           retention-days: 14
+
+      # Artifacts need a GitHub login to download; the phone needs a plain link.
+      # Publishing a Release gives a permanent, tappable .apk URL.
+      - name: Publish APKs as a Release
+        if: ${{ github.event_name == 'workflow_dispatch' && inputs.publish_release }}
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: build-${{ github.run_number }}
+          name: CloudFusion APK build ${{ github.run_number }}
+          body: |
+            Installable Android debug build of the CloudFusion client.
+
+            **Android 8.0+ (API 26)** — tested target: Android 12.
+
+            | File | Which phone |
+            |---|---|
+            | `cloudfusion-arm64-v8a.apk` | Almost every phone from ~2016 onward (Snapdragon/Exynos/MediaTek 64-bit) — **use this one** |
+            | `cloudfusion-armeabi-v7a.apk` | Older 32-bit devices only |
+            | `cloudfusion-x86_64.apk` | Emulators / x86 tablets |
+
+            After install, open the app and set **Relay URL** to your CloudFusion
+            backend (e.g. `http://192.168.1.5:3000` on the same Wi-Fi, or your
+            deployed `https://` URL), then tap **Use demo session**.
+          files: |
+            dist/cloudfusion-arm64-v8a.apk
+            dist/cloudfusion-armeabi-v7a.apk
+            dist/cloudfusion-x86_64.apk
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
