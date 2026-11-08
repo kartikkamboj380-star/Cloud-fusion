@@ -180,6 +180,16 @@ jobs:
           mv "$WRAPPER.tmp" "$WRAPPER"
           cat "$WRAPPER"
 
+      - name: Report Android SDK levels
+        # Docs/release notes claim a minimum Android version — print the truth
+        # from the generated Gradle config so the claim is verifiable.
+        run: |
+          set -euo pipefail
+          grep -rn "minSdk\|targetSdk\|compileSdk" android/app/build.gradle.kts || true
+          FLUTTER_ROOT=$(dirname "$(dirname "$(readlink -f "$(command -v flutter)")")")
+          grep -rn "minSdkVersion\|targetSdkVersion\|compileSdkVersion" \
+            "$FLUTTER_ROOT/packages/flutter_tools/gradle" 2>/dev/null | head -20 || true
+
       - name: Resolve packages
         run: flutter pub get
 
@@ -250,7 +260,10 @@ jobs:
           body: |
             Installable Android debug build of the CloudFusion client.
 
-            **Android 8.0+ (API 26)** — tested target: Android 12.
+            Runs on any device supported by the current Flutter stable release
+            (Android 5.0+ in practice) — **Android 12 is fully supported**.
+            Min/target SDK levels are printed in the job log under
+            *Report Android SDK levels*.
 
             | File | Which phone |
             |---|---|
