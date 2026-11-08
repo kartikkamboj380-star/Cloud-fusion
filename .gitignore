@@ -1,0 +1,43 @@
+# dependencies
+node_modules/
+
+# next.js
+.next/
+out/
+build/
+
+# env / secrets — never commit
+.env
+.env.local
+.env.*.local
+*.pem
+*.key
+
+# logs
+*.log
+npm-debug.log*
+
+# os/editor
+.DS_Store
+.idea/
+.vscode/
+
+# drizzle generated snapshots (schema.ts is the source of truth here)
+drizzle/meta/
+
+# android / flutter
+mobile/.dart_tool/
+mobile/.flutter-plugins
+mobile/.flutter-plugins-dependencies
+mobile/build/
+mobile/android/.gradle/
+mobile/android/local.properties
+mobile/**/GeneratedPluginRegistrant.*
+*.apk
+*.aab
+
+# deliverable zips
+public/downloads/*.zip
+
+# typescript incremental build info
+*.tsbuildinfo

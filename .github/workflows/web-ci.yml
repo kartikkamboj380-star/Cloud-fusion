@@ -1,0 +1,40 @@
+name: web-ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  typecheck-test-build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Type generation
+        run: npx next typegen
+
+      - name: Strict typecheck
+        run: npx tsc --noEmit --pretty false
+
+      - name: Engine unit tests (SSRF guard, allocator)
+        run: npx tsx --test src/lib/engine/__tests__/*.test.ts
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production build
+        run: npm run build
+        env:
+          # Dummy URL lets route modules initialize during build-time module
+          # graph evaluation; no database is contacted in CI.
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/build_stub
+          APP_SECRET: ci-placeholder-not-a-secret
