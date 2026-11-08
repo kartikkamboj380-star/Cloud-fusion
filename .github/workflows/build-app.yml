@@ -142,41 +142,39 @@ jobs:
           echo "--- gradle-wrapper.properties ---"
           cat android/gradle/wrapper/gradle-wrapper.properties
 
-      - name: Verify Gradle distribution URL
-        # The generated wrapper may point at a release asset that does not
-        # exist for the current Flutter template. Probe the URL and fall back to
-        # an equivalent, reachable distribution so the build is deterministic.
-        continue-on-error: true
+      - name: Pre-cache Gradle distribution
+        # The generated wrapper points at a GitHub release asset that the runner
+        # occasionally fails to download. Fetch the distribution ourselves (with
+        # retries + mirrors) and pin the wrapper to the local file so the APK
+        # build never depends on that download succeeding.
         run: |
           set -euo pipefail
           WRAPPER=android/gradle/wrapper/gradle-wrapper.properties
-          URL=$(grep -oE 'https[^[:space:]]+\.zip' "$WRAPPER" | head -1)
+          # Gradle escapes the scheme separator in the properties file (https\://)
+          URL=$(grep -oE 'https[^[:space:]]+\.zip' "$WRAPPER" | head -1 | sed 's/\\:/:/g')
           VER=$(basename "$URL" | sed -E 's/^gradle-([0-9.]+)(-.*)?\.zip$/\1/')
-          echo "wrapped version: $VER"
-          CHOSEN=""
-          for CAND in "$URL" \
-                      "https://downloads.gradle.org/distributions/gradle-$VER-all.zip" \
-                      "https://downloads.gradle.org/distributions/gradle-$VER-bin.zip" \
-                      "https://services.gradle.org/distributions/gradle-$VER-all.zip" \
-                      "https://services.gradle.org/distributions/gradle-$VER-bin.zip"; do
-            CODE=$(curl -sIL --max-time 30 -o /dev/null -w '%{http_code}' "$CAND" || echo 000)
-            echo "  $CAND -> $CODE"
-            if [ "$CODE" = "200" ]; then CHOSEN="$CAND"; break; fi
+          FLAVOUR=$(basename "$URL" | sed -E 's/^gradle-[0-9.]+-(.*)\.zip$/\1/')
+          echo "wrapper wants gradle $VER ($FLAVOUR): $URL"
+
+          DEST=/tmp/gradle-dist.zip
+          OK=0
+          for CAND in \
+            "https://downloads.gradle.org/distributions/gradle-$VER-$FLAVOUR.zip" \
+            "https://services.gradle.org/distributions/gradle-$VER-$FLAVOUR.zip" \
+            "https://downloads.gradle.org/distributions/gradle-$VER-bin.zip" \
+            "$URL"; do
+            echo "trying $CAND"
+            if curl -fsSL --retry 5 --retry-delay 5 --retry-all-errors \
+                 --connect-timeout 20 --max-time 600 -o "$DEST" "$CAND"; then
+              if unzip -tq "$DEST" >/dev/null 2>&1; then OK=1; echo "downloaded from $CAND"; break; fi
+              echo "  corrupt archive, next mirror"
+            fi
           done
-          if [ -n "$CHOSEN" ] && [ "$CHOSEN" != "$URL" ]; then
-            CAND="$CHOSEN" python3 - "$WRAPPER" <<'PY'
-          import os, sys, pathlib
-          p = pathlib.Path(sys.argv[1])
-          url = os.environ["CAND"].replace(":", r"\:")
-          lines = [l for l in p.read_text().splitlines() if not l.startswith("distributionUrl=")]
-          lines.append(f"distributionUrl={url}")
-          p.write_text("\n".join(lines) + "\n")
-          print("rewrote distributionUrl ->", os.environ["CAND"])
-          PY
-            cat "$WRAPPER"
-          else
-            echo "keeping original distributionUrl"
-          fi
+          if [ "$OK" != "1" ]; then echo "::error::could not fetch a Gradle distribution"; exit 1; fi
+
+          { grep -v '^distributionUrl=' "$WRAPPER" || true; echo "distributionUrl=file\:${DEST}"; } > "$WRAPPER.tmp"
+          mv "$WRAPPER.tmp" "$WRAPPER"
+          cat "$WRAPPER"
 
       - name: Resolve packages
         run: flutter pub get
@@ -192,15 +190,26 @@ jobs:
         env:
           CF_BACKEND_URL: ${{ inputs.backend_url }}
         run: |
-          set -euo pipefail
-          # Pass --dart-define only when a URL was supplied; otherwise the
-          # in-app "Relay URL" field stays the source of truth.
-          if [ -n "${CF_BACKEND_URL:-}" ]; then
-            flutter build apk --debug --split-per-abi --dart-define=CF_BACKEND_URL="$CF_BACKEND_URL" 2>&1 | tee /tmp/apk-build.log
-          else
-            flutter build apk --debug --split-per-abi 2>&1 | tee /tmp/apk-build.log
+          set -uo pipefail
+          ATTEMPT=1
+          while [ "$ATTEMPT" -le 3 ]; do
+            echo "=== flutter build apk attempt $ATTEMPT ==="
+            if [ -n "${CF_BACKEND_URL:-}" ]; then
+              flutter build apk --debug --split-per-abi --dart-define=CF_BACKEND_URL="$CF_BACKEND_URL" 2>&1 | tee /tmp/apk-build.log
+            else
+              flutter build apk --debug --split-per-abi 2>&1 | tee /tmp/apk-build.log
+            fi
+            STATUS=${PIPESTATUS[0]}
+            if [ "$STATUS" -eq 0 ]; then break; fi
+            echo "attempt $ATTEMPT failed (exit $STATUS)"
+            ATTEMPT=$((ATTEMPT + 1))
+            sleep 15
+          done
+          if [ "$STATUS" -ne 0 ]; then
+            echo "::error::flutter build apk failed after $((ATTEMPT - 1)) attempts"
+            tail -60 /tmp/apk-build.log
+            exit 1
           fi
-          test "${PIPESTATUS[0]}" -eq 0 || { tail -40 /tmp/apk-build.log; exit 1; }
           # Fixed, predictable names so the downloaded files are self-explanatory.
           cd build/app/outputs/flutter-apk
           for f in app-*.apk; do
