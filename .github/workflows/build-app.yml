@@ -137,6 +137,46 @@ jobs:
             sed -i 's|</manifest>|    <application android:usesCleartextTraffic="true" />\n</manifest>|' "$DEBUG_MANIFEST"
           fi
           grep -c usesCleartextTraffic "$DEBUG_MANIFEST" || true
+          echo "Flutter: $(flutter --version | head -1)"
+          echo "Java: $(java -version 2>&1 | head -1)"
+          echo "--- gradle-wrapper.properties ---"
+          cat android/gradle/wrapper/gradle-wrapper.properties
+
+      - name: Verify Gradle distribution URL
+        # The generated wrapper may point at a release asset that does not
+        # exist for the current Flutter template. Probe the URL and fall back to
+        # an equivalent, reachable distribution so the build is deterministic.
+        continue-on-error: true
+        run: |
+          set -euo pipefail
+          WRAPPER=android/gradle/wrapper/gradle-wrapper.properties
+          URL=$(grep -oE 'https[^[:space:]]+\.zip' "$WRAPPER" | head -1)
+          VER=$(basename "$URL" | sed -E 's/^gradle-([0-9.]+)(-.*)?\.zip$/\1/')
+          echo "wrapped version: $VER"
+          CHOSEN=""
+          for CAND in "$URL" \
+                      "https://downloads.gradle.org/distributions/gradle-$VER-all.zip" \
+                      "https://downloads.gradle.org/distributions/gradle-$VER-bin.zip" \
+                      "https://services.gradle.org/distributions/gradle-$VER-all.zip" \
+                      "https://services.gradle.org/distributions/gradle-$VER-bin.zip"; do
+            CODE=$(curl -sIL --max-time 30 -o /dev/null -w '%{http_code}' "$CAND" || echo 000)
+            echo "  $CAND -> $CODE"
+            if [ "$CODE" = "200" ]; then CHOSEN="$CAND"; break; fi
+          done
+          if [ -n "$CHOSEN" ] && [ "$CHOSEN" != "$URL" ]; then
+            CAND="$CHOSEN" python3 - "$WRAPPER" <<'PY'
+          import os, sys, pathlib
+          p = pathlib.Path(sys.argv[1])
+          url = os.environ["CAND"].replace(":", r"\:")
+          lines = [l for l in p.read_text().splitlines() if not l.startswith("distributionUrl=")]
+          lines.append(f"distributionUrl={url}")
+          p.write_text("\n".join(lines) + "\n")
+          print("rewrote distributionUrl ->", os.environ["CAND"])
+          PY
+            cat "$WRAPPER"
+          else
+            echo "keeping original distributionUrl"
+          fi
 
       - name: Resolve packages
         run: flutter pub get
@@ -156,10 +196,11 @@ jobs:
           # Pass --dart-define only when a URL was supplied; otherwise the
           # in-app "Relay URL" field stays the source of truth.
           if [ -n "${CF_BACKEND_URL:-}" ]; then
-            flutter build apk --debug --split-per-abi --dart-define=CF_BACKEND_URL="$CF_BACKEND_URL"
+            flutter build apk --debug --split-per-abi --dart-define=CF_BACKEND_URL="$CF_BACKEND_URL" 2>&1 | tee /tmp/apk-build.log
           else
-            flutter build apk --debug --split-per-abi
+            flutter build apk --debug --split-per-abi 2>&1 | tee /tmp/apk-build.log
           fi
+          test "${PIPESTATUS[0]}" -eq 0 || { tail -40 /tmp/apk-build.log; exit 1; }
           # Fixed, predictable names so the downloaded files are self-explanatory.
           cd build/app/outputs/flutter-apk
           for f in app-*.apk; do
