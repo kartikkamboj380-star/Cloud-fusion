@@ -87,7 +87,7 @@ export default function Landing() {
             <span className="text-[var(--cyan)]">SOURCE URL</span><ArrowRight size={11} />
             <span className="text-[var(--violet)]">CLOUDFUSION RELAY</span><ArrowRight size={11} />
             <span className="text-[var(--lime)]">GOOGLE DRIVE</span>
-            <span className="text-[var(--faint)]">// phone never touches payload</span>
+            <span className="text-[var(--faint)]">{"// phone never touches payload"}</span>
           </div>
         </motion.div>
 

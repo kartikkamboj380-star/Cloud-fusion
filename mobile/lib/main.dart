@@ -163,10 +163,10 @@ class _LoginScreenState extends State<LoginScreen> {
             TextField(
               controller: _server,
               keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
+              decoration: InputDecoration(
                 labelText: 'Relay URL',
-                hintText: 'http://10.0.2.2:3000',
-                border: OutlineInputBorder(),
+                hintText: ApiClient.defaultBaseUrl,
+                border: const OutlineInputBorder(),
               ),
             ),
             const SizedBox(height: 16),

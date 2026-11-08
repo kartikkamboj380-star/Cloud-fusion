@@ -1,0 +1,186 @@
+name: build-app
+
+# Actions tab → "build-app" → Run workflow.
+#
+# Turns this repo's own source into downloadable, installable builds:
+#   cloudfusion-web → standalone Next.js server bundle (zip, runnable)
+#   cloudfusion-apk → Android debug APK(s) for the Flutter client
+#
+# Also runs on every push to main that touches the app source.
+on:
+  workflow_dispatch:
+    inputs:
+      backend_url:
+        description: "Backend URL baked into the APK (leave empty to type it in the app)"
+        required: false
+        default: ""
+      build_web:
+        description: "Build the web console artifact"
+        type: boolean
+        default: true
+      build_apk:
+        description: "Build the Android APK artifact"
+        type: boolean
+        default: true
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "mobile/**"
+      - "package.json"
+      - "package-lock.json"
+      - "next.config.ts"
+      - "tsconfig.json"
+      - ".github/workflows/build-app.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: build-app-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web console (Next.js)
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_web }}
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install
+        run: npm ci
+
+      - name: Type generation
+        run: npx next typegen
+
+      - name: Strict typecheck
+        run: npx tsc --noEmit --pretty false
+
+      - name: Engine unit tests (SSRF guard, allocator)
+        run: npx tsx --test src/lib/engine/__tests__/*.test.ts
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Production build (standalone)
+        run: npm run build
+        env:
+          # Placeholders only: route modules are initialised at build time,
+          # no database or real secret is used.
+          DATABASE_URL: postgresql://postgres:postgres@localhost:5432/build_stub
+          APP_SECRET: ci-placeholder-not-a-secret
+          TOKEN_ENCRYPTION_KEY: ci-placeholder-not-a-secret
+
+      - name: Assemble runnable artifact
+        run: |
+          set -euo pipefail
+          OUT=dist/cloudfusion-web
+          mkdir -p "$OUT/.next"
+          cp -r .next/standalone/. "$OUT"/
+          cp -r .next/static "$OUT/.next/static"
+          if [ -d public ]; then cp -r public "$OUT/public"; fi
+          if [ -d docs ]; then cp -r docs "$OUT/docs"; fi
+          cp docs/RUN-ARTIFACT.md "$OUT/README.md"
+          ( cd dist && zip -qr cloudfusion-web.zip cloudfusion-web )
+          ls -lh dist/cloudfusion-web.zip
+
+      - name: Upload web artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudfusion-web
+          path: dist/cloudfusion-web.zip
+          retention-days: 14
+
+  apk:
+    name: Android APK (Flutter)
+    if: ${{ github.event_name != 'workflow_dispatch' || inputs.build_apk }}
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Java 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: "17"
+
+      - name: Install Flutter
+        uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Ensure Android project scaffolding
+        run: |
+          set -euo pipefail
+          # This repo ships the Dart sources only; generate the Gradle wrapper
+          # on demand so the artifact is reproducible without checked-in
+          # generated files. Copied from a temp dir so lib/ and test/ are
+          # never overwritten.
+          if [ ! -d android ]; then
+            flutter create --platforms=android --project-name cloudfusion_mobile --org app.cloudfusion /tmp/cf_scaffold >/dev/null
+            cp -r /tmp/cf_scaffold/android ./android
+          fi
+          # Debug builds are expected to reach a self-hosted relay over plain
+          # HTTP (dev laptops / LAN). Release builds keep the platform default.
+          DEBUG_MANIFEST=android/app/src/debug/AndroidManifest.xml
+          if [ -f "$DEBUG_MANIFEST" ] && ! grep -q usesCleartextTraffic "$DEBUG_MANIFEST"; then
+            sed -i 's|</manifest>|    <application android:usesCleartextTraffic="true" />\n</manifest>|' "$DEBUG_MANIFEST"
+          fi
+          grep -c usesCleartextTraffic "$DEBUG_MANIFEST" || true
+
+      - name: Resolve packages
+        run: flutter pub get
+
+      - name: Static analysis
+        # Errors stay fatal; info-level lints (deprecations) do not fail the build.
+        run: flutter analyze --no-fatal-infos
+
+      - name: Unit tests
+        run: flutter test
+
+      - name: Build debug APK (split per ABI)
+        env:
+          CF_BACKEND_URL: ${{ inputs.backend_url }}
+        run: |
+          set -euo pipefail
+          # Pass --dart-define only when a URL was supplied; otherwise the
+          # in-app "Relay URL" field stays the source of truth.
+          if [ -n "${CF_BACKEND_URL:-}" ]; then
+            flutter build apk --debug --split-per-abi --dart-define=CF_BACKEND_URL="$CF_BACKEND_URL"
+          else
+            flutter build apk --debug --split-per-abi
+          fi
+          # Fixed, predictable names so the downloaded files are self-explanatory.
+          cd build/app/outputs/flutter-apk
+          for f in app-*.apk; do
+            case "$f" in
+              *arm64*) cp "$f" cloudfusion-arm64-v8a.apk ;;
+              *armeabi*) cp "$f" cloudfusion-armeabi-v7a.apk ;;
+              *x86_64*) cp "$f" cloudfusion-x86_64.apk ;;
+            esac
+          done
+          ls -lh cloudfusion-*.apk
+
+      - name: Collect APKs
+        run: |
+          set -euo pipefail
+          mkdir -p ../dist
+          cp build/app/outputs/flutter-apk/*.apk ../dist/
+          ls -lh ../dist
+
+      - name: Upload APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: cloudfusion-apk
+          path: dist/*.apk
+          retention-days: 14
