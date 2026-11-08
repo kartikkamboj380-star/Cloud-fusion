@@ -21,13 +21,21 @@ export default function PoolRing({ drives, available, used }: { drives: RingDriv
   const gapDeg = drives.length > 1 ? 2.2 : 0;
   const gapPx = (gapDeg / 360) * c;
 
-  let acc = 0;
+  // Pure prefix sums — no accumulator mutated inside a render callback.
+  const shareOf = (d: RingDrive) => (d.quotaTotal / poolTotal) * (c - gapPx * drives.length);
+  const startOf = (i: number) =>
+    drives.slice(0, i).reduce((sum, d) => sum + shareOf(d) + gapPx, 0);
+
   const segs = drives.map((d, i) => {
-    const sharePx = (d.quotaTotal / poolTotal) * (c - gapPx * drives.length);
+    const sharePx = shareOf(d);
     const freeRatio = d.quotaTotal > 0 ? Math.min(1, Math.max(0, d.free / d.quotaTotal)) : 0;
-    const seg = { drive: d, color: DRIVE_COLORS[i % DRIVE_COLORS.length], start: acc, sharePx, brightPx: sharePx * freeRatio };
-    acc += sharePx + gapPx;
-    return seg;
+    return {
+      drive: d,
+      color: DRIVE_COLORS[i % DRIVE_COLORS.length],
+      start: startOf(i),
+      sharePx,
+      brightPx: sharePx * freeRatio,
+    };
   });
 
   return (

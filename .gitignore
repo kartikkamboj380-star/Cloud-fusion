@@ -41,3 +41,6 @@ public/downloads/*.zip
 
 # typescript incremental build info
 *.tsbuildinfo
+
+# build artifacts (produced by the build-app workflow)
+/dist/

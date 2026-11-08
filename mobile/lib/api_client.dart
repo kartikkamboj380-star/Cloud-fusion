@@ -20,6 +20,14 @@ class ApiException implements Exception {
   String toString() => message;
 }
 
+/// Backend URL baked in at build time (`--dart-define=CF_BACKEND_URL=...`).
+/// It is only the *initial* value: the login screen can always override it,
+/// and the override wins from then on (stored in SharedPreferences).
+const String kBackendUrlOverride = String.fromEnvironment('CF_BACKEND_URL');
+
+/// Android emulator reaches the host machine through 10.0.2.2.
+const String kEmulatorFallbackUrl = 'http://10.0.2.2:3000';
+
 class ApiClient {
   ApiClient({required this.baseUrl, String? cookie}) : _cookie = cookie;
 
@@ -29,10 +37,13 @@ class ApiClient {
   String baseUrl;
   String? _cookie;
 
+  /// URL the login screen starts with: saved value → build-time define → emulator loopback.
+  static String get defaultBaseUrl => kBackendUrlOverride.isNotEmpty ? kBackendUrlOverride : kEmulatorFallbackUrl;
+
   static Future<ApiClient> restore() async {
     final prefs = await SharedPreferences.getInstance();
     return ApiClient(
-      baseUrl: prefs.getString(_keyBase) ?? 'http://10.0.2.2:3000', // Android emulator loopback
+      baseUrl: prefs.getString(_keyBase) ?? defaultBaseUrl,
       cookie: prefs.getString(_keyCookie),
     );
   }

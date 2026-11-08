@@ -79,8 +79,23 @@ docs/             ARCHITECTURE · API · DEPLOYMENT · SECURITY
 
 ## GitHub Actions
 
+- **`build-app.yml`** — **builds the app from this repo's source, from the Actions tab**
+  - **Actions → build-app → Run workflow** (optionally paste your backend URL)
+  - `cloudfusion-web` artifact → standalone Next.js console (zip, `node server.js`) — see `docs/RUN-ARTIFACT.md`
+  - `cloudfusion-apk` artifact → installable Android debug APKs (`arm64-v8a`, `armeabi-v7a`, `x86_64`)
+  - Also runs automatically on pushes to `main` touching `src/**` or `mobile/**`
 - **`web-ci.yml`** — install, typecheck, engine unit tests, production build (PRs + main)
 - **`android-apk.yml`** — Flutter install → `pub get` → format check → analyze → test → **debug APK artifact**
+
+### Building the app yourself (without Actions)
+
+```bash
+npm ci && npm run build          # web: production build (.next/standalone → node .next/standalone/server.js)
+cd mobile && flutter pub get && flutter build apk --debug
+```
+
+Bake a backend into the APK: `flutter build apk --debug --dart-define=CF_BACKEND_URL=https://relay.example.com`
+(without it, the app's **Relay URL** field is the source of truth).
 
 **Required secrets:** none for CI itself. For **real-mode deploys**, set `DATABASE_URL`, `APP_SECRET`, `TOKEN_ENCRYPTION_KEY`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `APP_BASE_URL` in your hosting provider — never in the repo.
 
